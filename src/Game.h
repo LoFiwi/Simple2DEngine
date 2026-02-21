@@ -17,6 +17,11 @@ public:
     // Add an entity to the game
     void addEntity(const Entity& e) { entities.push_back(e); }
 
+    // Get reference to entity by index
+    Entity& getEntity(int index){
+        return entities[index];
+    }
+
     // Render the grid and all entities
     void render(){
         for (int y = 0; y < height; ++y){
