@@ -16,8 +16,19 @@ private:
     int width, height;              // Grid size
     int playerIndex;                // Index of player entity
     std::vector<Entity> entities;   // List of all entities
+    int pendingDx, pendingDy;       // Buffering player movement
 
 private:
+
+    bool isWallAt(int x, int y){
+        for(auto& e : entities){
+            if(e.type == ENTITY_WALL && e.x == x && e.y == y){
+                return true;
+            }
+        }
+        return false;
+    }
+
     void moveEntity(Entity& e, int dx, int dy){
         int newX = e.x + dx;
         int newY = e.y + dy;
@@ -28,35 +39,47 @@ private:
         if(newY < 0) {newY = 0;}
         if(newY >= height) {newY = height -1;}
 
-        // Check collision with walls
-        for(auto& other : entities){
-            if(other.symbol == '#' && other.x == newX && other.y == newY) {return;}
+        if(isWallAt(newX, newY)){
+            return;
         }
 
         e.x = newX;
         e.y = newY;
     }
  
-    // Handle one keyboard input event
+    // Convert input into buffered movement
     // !! ONLY ENG LAYOUT !!
     void handleInput(int input){
-        if(playerIndex < 0 || playerIndex > (int)entities.size()){
-            return;
-        }
 
-        Entity& player = entities[playerIndex];
+        // Reset buffered movement each frame
+        pendingDx = 0;
+        pendingDy = 0;
 
         // Convert input to lowercase to ignore CapsLock/Shift
         char c = (char)std::tolower(input);
 
-        if(c == 'w') {moveEntity(player,0,-1);}
-        if(c == 's') {moveEntity(player,0,+1);}
-        if(c == 'a') {moveEntity(player,-1,0);}
-        if(c == 'd') {moveEntity(player,+1,0);}
+        if(c == 'w') {pendingDy = - 1;}
+        if(c == 's') {pendingDy = 1;}
+        if(c == 'a') {pendingDx = -1;}
+        if(c == 'd') {pendingDx = 1;}
+    }
+
+    void update(){
+        if(playerIndex >= 0 && playerIndex < (int)entities.size()){
+            Entity& player = entities[playerIndex];
+            moveEntity(player, pendingDx, pendingDy);
+        }
+
+        // Move enemies automatically. Now it simple movement: enemy tries to go right each update.
+        for(auto&e : entities){
+            if(e.type == ENTITY_ENEMY){
+                moveEntity(e, 1, 0);
+            }
+        }
     }
 
 public:
-    Game(int w, int h) : width(w), height(h), playerIndex(-1) {}
+    Game(int w, int h) : width(w), height(h), playerIndex(-1), pendingDx(0), pendingDy(0) {}
 
     void loadLevel(const std::vector<std::string>&map){
         entities.clear();
@@ -70,11 +93,14 @@ public:
                 char c = map[y][x];
 
                 if(c == '#'){
-                    entities.push_back(Entity(x,y,'#'));
+                    entities.push_back(Entity(x,y,'#', ENTITY_WALL));
                 }
                 if(c == '@'){
-                    entities.push_back(Entity(x,y,'@'));
+                    entities.push_back(Entity(x,y,'@', ENTITY_PLAYER));
                     playerIndex = (int)entities.size() - 1;
+                }
+                if(c == 'E'){
+                    entities.push_back(Entity(x,y,'E', ENTITY_ENEMY));
                 }
             }
         }
@@ -88,7 +114,10 @@ public:
 
                 // Check if an entity is in this position
                 for (auto& e : entities){
-                    if (e.x == x && e.y == y) cell = e.symbol;
+                    if (e.x == x && e.y == y) {
+                        cell = e.symbol;
+                        break;
+                    }
                 }
 
                 std::cout << cell;
@@ -108,8 +137,12 @@ public:
             int input = _getch();
 
             char c = (char)std::tolower(input);
-            if(c == 'q') {running = false;}
-            else {handleInput(input);}
+            if(c == 'q') {
+                running = false;
+                continue;
+            }
+            handleInput(input);
+            update();
         }
     }
 };
