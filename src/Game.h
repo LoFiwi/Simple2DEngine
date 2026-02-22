@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <cctype>
 #include <string>
+#include <chrono>
+#include <thread>
 
 #include "Entity.h"
 
@@ -15,8 +17,13 @@ class Game{
 private:
     int width, height;              // Grid size
     int playerIndex;                // Index of player entity
-    std::vector<Entity> entities;   // List of all entities
     int pendingDx, pendingDy;       // Buffering player movement
+
+    std::vector<Entity> entities;   // List of all entities
+    
+    // Time control for enemy movement(ticks)
+    std::chrono::steady_clock::time_point lastEnemyMove;
+    int enemyMoveDelayMs;
 
 private:
 
@@ -29,7 +36,7 @@ private:
         return false;
     }
 
-    void moveEntity(Entity& e, int dx, int dy){
+    bool tryMoveEntity(Entity& e, int dx, int dy){
         int newX = e.x + dx;
         int newY = e.y + dy;
 
@@ -40,11 +47,17 @@ private:
         if(newY >= height) {newY = height -1;}
 
         if(isWallAt(newX, newY)){
-            return;
+            return false;
+        }
+
+        // If clamping prevented movement, treat as blocked
+        if(newX == e.x && newY == e.y){
+            return false;
         }
 
         e.x = newX;
         e.y = newY;
+        return true;
     }
  
     // Convert input into buffered movement
@@ -64,22 +77,49 @@ private:
         if(c == 'd') {pendingDx = 1;}
     }
 
+    // Update world state(player, enemies, etc.)
     void update(){
+
+        // Move player
         if(playerIndex >= 0 && playerIndex < (int)entities.size()){
             Entity& player = entities[playerIndex];
-            moveEntity(player, pendingDx, pendingDy);
+            (void)tryMoveEntity(player, pendingDx, pendingDy);
         }
 
-        // Move enemies automatically. Now it simple movement: enemy tries to go right each update.
-        for(auto&e : entities){
-            if(e.type == ENTITY_ENEMY){
-                moveEntity(e, 1, 0);
+        // Time based enemy movement
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastEnemyMove).count();
+
+        if(elapsed >= enemyMoveDelayMs){
+            // (patrol left-right)
+            for(auto&e : entities){
+                if(e.type == ENTITY_ENEMY){
+                    // If enemey has no direction yet, set default direction to left
+                    if(e.vx == 0 && e.vy ==0){
+                       e.vx = -1;
+                       e.vy = 0;
+                    }
+
+                    bool moved = tryMoveEntity(e, e.vx, e.vy);
+
+                    if(!moved){
+                        e.vx = -e.vx;
+                        e.vy = -e.vy;
+                        (void)tryMoveEntity(e,e.vx,e.vy);
+                    }
+                }
             }
+           lastEnemyMove = now; 
         }
     }
+        
+
 
 public:
-    Game(int w, int h) : width(w), height(h), playerIndex(-1), pendingDx(0), pendingDy(0) {}
+    Game(int w, int h) 
+        : width(w), height(h), playerIndex(-1), pendingDx(0), pendingDy(0), enemyMoveDelayMs(200) {
+            lastEnemyMove = std::chrono::steady_clock::now();
+        }
 
     void loadLevel(const std::vector<std::string>&map){
         entities.clear();
@@ -100,7 +140,10 @@ public:
                     playerIndex = (int)entities.size() - 1;
                 }
                 if(c == 'E'){
-                    entities.push_back(Entity(x,y,'E', ENTITY_ENEMY));
+                    Entity enemy(x,y,'E', ENTITY_ENEMY);
+                    enemy.vx = -1;
+                    enemy.vy = 0;
+                    entities.push_back(enemy);
                 }
             }
         }
@@ -131,18 +174,27 @@ public:
         bool running = true;
 
         while(running){
+
+            pendingDx = 0;
+            pendingDy = 0;
+
+            if(_kbhit()){
+                int input = _getch();
+                char c = (char)std::tolower(input);
+
+                if(c == 'q') {
+                    running = false;
+                    continue;
+                }
+                handleInput(input);
+            }
+
+            update();
             system("cls");  //Clear console(Win)
             render();
 
-            int input = _getch();
-
-            char c = (char)std::tolower(input);
-            if(c == 'q') {
-                running = false;
-                continue;
-            }
-            handleInput(input);
-            update();
+            // Simple frame limiter (~60fps)
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
     }
 };
