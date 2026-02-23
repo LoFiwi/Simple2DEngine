@@ -4,7 +4,6 @@
 // List of entity types
 enum EntityType{
 	ENTITY_PLAYER,
-	ENTITY_WALL,
 	ENTITY_ENEMY
 };
 

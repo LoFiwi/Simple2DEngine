@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "Entity.h"
+#include "Tile.h"
 
 // This class manages the game world and rendering
 class Game{
@@ -19,6 +20,7 @@ private:
     int playerIndex;                // Index of player entity
     int pendingDx, pendingDy;       // Buffering player movement
 
+    std::vector<std::vector<TileType>> grid;    // Static map tiles, like walls
     std::vector<Entity> entities;   // List of all entities
     
     // Time control for enemy movement(ticks)
@@ -27,31 +29,32 @@ private:
 
 private:
 
-    bool isWallAt(int x, int y){
-        for(auto& e : entities){
-            if(e.type == ENTITY_WALL && e.x == x && e.y == y){
-                return true;
-            }
+    // Convert tile type to a character for console
+    char tileToChar(TileType t) const{
+        if(t == TILE_WALL){
+            return '#';
         }
-        return false;
+        return '.';
+    }
+
+    // Check if coords are inside the grid
+    bool inBounds(int x, int y) const{
+        return (x >= 0 && x < width && y >= 0 && y < height);
+    }
+
+    // Check if a cell is blocked for move
+    bool isBlocked(int x, int y) const{
+        if(!inBounds(x,y)){
+            return true;
+        }
+        return grid[y][x] == TILE_WALL;
     }
 
     bool tryMoveEntity(Entity& e, int dx, int dy){
         int newX = e.x + dx;
         int newY = e.y + dy;
 
-        // Clamp to borders
-        if(newX < 0) {newX = 0;}
-        if(newX >= width) {newX = width-1;}
-        if(newY < 0) {newY = 0;}
-        if(newY >= height) {newY = height -1;}
-
-        if(isWallAt(newX, newY)){
-            return false;
-        }
-
-        // If clamping prevented movement, treat as blocked
-        if(newX == e.x && newY == e.y){
+        if(isBlocked(newX, newY)){
             return false;
         }
 
@@ -117,7 +120,12 @@ private:
 
 public:
     Game(int w, int h) 
-        : width(w), height(h), playerIndex(-1), pendingDx(0), pendingDy(0), enemyMoveDelayMs(200) {
+        : width(w), height(h),
+        grid(), 
+        playerIndex(-1), 
+        pendingDx(0), 
+        pendingDy(0), 
+        enemyMoveDelayMs(200) {
             lastEnemyMove = std::chrono::steady_clock::now();
         }
 
@@ -128,12 +136,18 @@ public:
         height = (int)map.size();
         width = (height > 0) ? (int)map[0].size() : 0;
 
+        grid.assign(height, std::vector<TileType>(width,TILE_EMPTY));
+
         for(int y = 0; y < height; ++y){
             for(int x = 0; x < width; ++x){
+
                 char c = map[y][x];
 
                 if(c == '#'){
-                    entities.push_back(Entity(x,y,'#', ENTITY_WALL));
+                    grid[y][x] = TILE_WALL;
+                }
+                else{
+                    grid[y][x] = TILE_EMPTY;
                 }
                 if(c == '@'){
                     entities.push_back(Entity(x,y,'@', ENTITY_PLAYER));
@@ -153,7 +167,9 @@ public:
     void render(){
         for (int y = 0; y < height; ++y){
             for (int x = 0; x < width; ++x){
-                char cell = '.';   // Default empty cell
+
+                // Take tileType symbol
+                char cell = tileToChar(grid[y][x]);
 
                 // Check if an entity is in this position
                 for (auto& e : entities){
