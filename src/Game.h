@@ -23,6 +23,10 @@ private:
     std::vector<std::vector<TileType>> grid;    // Static map tiles, like walls
     std::vector<Entity> entities;   // List of all entities
     
+    // Game state
+    bool gameOver;  // True when player collided with enemy
+    std::vector<std::string> currentLevelMap;   // Stored to allow quick restart
+
     // Time control for enemy movement(ticks)
     std::chrono::steady_clock::time_point lastEnemyMove;
     int enemyMoveDelayMs;
@@ -62,7 +66,38 @@ private:
         e.y = newY;
         return true;
     }
- 
+
+    // Check collision between player and any enemy
+    void checkPlayerEnemyCollision(){
+        if(playerIndex < 0 || playerIndex >= (int)entities.size()){
+            return;
+        }
+
+        const Entity& player = entities[playerIndex];
+
+        for(const auto& e : entities){
+            if(e.type == ENTITY_ENEMY){
+                if(e.x == player.x && e.y == player.y){
+                    gameOver = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    void restartLevel(){
+
+        gameOver = false;
+        pendingDx = 0;
+        pendingDy = 0;
+
+        // Reload level from stored map
+        loadLevel(currentLevelMap);
+
+        // Reset enemy timer to avoid instant movement after restart
+        lastEnemyMove = std::chrono::steady_clock::now();
+    }
+
     // Convert input into buffered movement
     // !! ONLY ENG LAYOUT !!
     void handleInput(int input){
@@ -83,10 +118,19 @@ private:
     // Update world state(player, enemies, etc.)
     void update(){
 
+        if(gameOver){
+            return;
+        }
+
         // Move player
         if(playerIndex >= 0 && playerIndex < (int)entities.size()){
             Entity& player = entities[playerIndex];
             (void)tryMoveEntity(player, pendingDx, pendingDy);
+        }
+
+        checkPlayerEnemyCollision();
+        if(gameOver){
+            return;
         }
 
         // Time based enemy movement
@@ -112,7 +156,10 @@ private:
                     }
                 }
             }
-           lastEnemyMove = now; 
+           lastEnemyMove = now;
+
+           // Check collision after enemy movement
+           checkPlayerEnemyCollision();
         }
     }
         
@@ -124,14 +171,20 @@ public:
         grid(), 
         playerIndex(-1), 
         pendingDx(0), 
-        pendingDy(0), 
+        pendingDy(0),
+        gameOver(false),
+        currentLevelMap(), 
         enemyMoveDelayMs(200) {
             lastEnemyMove = std::chrono::steady_clock::now();
         }
 
     void loadLevel(const std::vector<std::string>&map){
+        // Store map to allow restart
+        currentLevelMap = map;
+
         entities.clear();
         playerIndex = -1;
+        gameOver = false;
 
         height = (int)map.size();
         width = (height > 0) ? (int)map[0].size() : 0;
@@ -161,6 +214,9 @@ public:
                 }
             }
         }
+
+        // Ensure enemy timer starts "fresh" after loading a level
+        lastEnemyMove = std::chrono::steady_clock::now();
     }
 
     // Render the grid and all entities
@@ -183,6 +239,12 @@ public:
             }
             std::cout << "\n";  // New line after each row
         }
+        if(gameOver){
+            std::cout << "==========================" << std::endl;
+            std::cout << "==    !GAME    OVER!    ==" << std::endl;
+            std::cout << "==========================" << std::endl;
+            std::cout << "Press 'R' to restart ro 'Q' to quit." << std::endl;
+        }
     }
 
     // Main game loop
@@ -202,7 +264,12 @@ public:
                     running = false;
                     continue;
                 }
-                handleInput(input);
+                if(c == 'r'){
+                    restartLevel();
+                }
+                if(!gameOver){
+                    handleInput(input);
+                }  
             }
 
             update();
