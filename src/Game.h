@@ -23,6 +23,8 @@ private:
     std::vector<std::vector<TileType>> grid;    // Static map tiles, like walls
     std::vector<Entity> entities;   // List of all entities
     
+    std::vector<std::vector<int>> entityAt; // Occupance grid: store entities index at [y][x], or -1 if empty
+
     // Game state
     bool gameOver;  // True when player collided with enemy
     std::vector<std::string> currentLevelMap;   // Stored to allow quick restart
@@ -54,35 +56,55 @@ private:
         return grid[y][x] == TILE_WALL;
     }
 
-    bool tryMoveEntity(Entity& e, int dx, int dy){
+    // Try to move entity by index and update occupancy grid
+    bool tryMoveEntity(int entityIndex, int dx, int dy){
+
+        if(entityIndex < 0 || entityIndex >= entities.size()){
+            return false;
+        }
+
+        if(dx == 0 && dy == 0){
+            return false;
+        }
+
+        Entity& e = entities[entityIndex];
+
         int newX = e.x + dx;
         int newY = e.y + dy;
 
+        // Static collision (walls/bounds)
         if(isBlocked(newX, newY)){
             return false;
         }
 
+        // Dynamic collision (who is in target cell?)
+        int otherIndex = entityAt[newY][newX];
+        if(otherIndex != -1 && otherIndex != entityIndex){
+            EntityType a = e.type;
+            EntityType b = entities[otherIndex].type;
+
+            bool playerEnemy =
+            (a == ENTITY_PLAYER && b == ENTITY_ENEMY) ||
+            (a == ENTITY_ENEMY && b == ENTITY_PLAYER);
+
+            if(playerEnemy){
+                entityAt[e.y][e.x] = -1;    // Remvoe from old cell
+                e.x = newX;
+                e.y = newY;
+                entityAt[e.y][e.x] = entityIndex;   // Occupy new cell
+
+                gameOver = true;
+                return true;
+            }
+            return false;
+        }
+
+        entityAt[e.y][e.x] = -1;    // Free old cell
         e.x = newX;
         e.y = newY;
-        return true;
-    }
+        entityAt[e.y][e.x] = entityIndex;   // Occupy new cell
 
-    // Check collision between player and any enemy
-    void checkPlayerEnemyCollision(){
-        if(playerIndex < 0 || playerIndex >= (int)entities.size()){
-            return;
-        }
-
-        const Entity& player = entities[playerIndex];
-
-        for(const auto& e : entities){
-            if(e.type == ENTITY_ENEMY){
-                if(e.x == player.x && e.y == player.y){
-                    gameOver = true;
-                    return;
-                }
-            }
-        }
+        return true; 
     }
 
     void restartLevel(){
@@ -124,13 +146,10 @@ private:
 
         // Move player
         if(playerIndex >= 0 && playerIndex < (int)entities.size()){
-            Entity& player = entities[playerIndex];
-            (void)tryMoveEntity(player, pendingDx, pendingDy);
-        }
-
-        checkPlayerEnemyCollision();
-        if(gameOver){
-            return;
+            (void)tryMoveEntity(playerIndex, pendingDx, pendingDy);
+            if(gameOver){
+                return;
+            }
         }
 
         // Time based enemy movement
@@ -139,27 +158,31 @@ private:
 
         if(elapsed >= enemyMoveDelayMs){
             // (patrol left-right)
-            for(auto&e : entities){
-                if(e.type == ENTITY_ENEMY){
+            for(int i = 0; i < (int)entities.size(); ++i){
+                if(entities[i].type == ENTITY_ENEMY){
                     // If enemey has no direction yet, set default direction to left
-                    if(e.vx == 0 && e.vy ==0){
-                       e.vx = -1;
-                       e.vy = 0;
+                    if(entities[i].vx == 0 && entities[i].vy == 0){
+                       entities[i].vx = -1;
+                       entities[i].vy = 0;
                     }
 
-                    bool moved = tryMoveEntity(e, e.vx, e.vy);
+                    bool moved = tryMoveEntity(i, entities[i].vx, entities[i].vy);
+                    if(gameOver){
+                        return;
+                    }
 
                     if(!moved){
-                        e.vx = -e.vx;
-                        e.vy = -e.vy;
-                        (void)tryMoveEntity(e,e.vx,e.vy);
+                        entities[i].vx = -entities[i].vx;
+                        entities[i].vy = -entities[i].vy;
+                        (void)tryMoveEntity(i, entities[i].vx, entities[i].vy);
+
+                        if(gameOver){
+                            return;
+                        }
                     }
                 }
             }
            lastEnemyMove = now;
-
-           // Check collision after enemy movement
-           checkPlayerEnemyCollision();
         }
     }
         
@@ -168,7 +191,9 @@ private:
 public:
     Game(int w, int h) 
         : width(w), height(h),
-        grid(), 
+        grid(),
+        entities(),
+        entityAt(), 
         playerIndex(-1), 
         pendingDx(0), 
         pendingDy(0),
@@ -190,6 +215,7 @@ public:
         width = (height > 0) ? (int)map[0].size() : 0;
 
         grid.assign(height, std::vector<TileType>(width,TILE_EMPTY));
+        entityAt.assign(height, std::vector<int>(width,-1));
 
         for(int y = 0; y < height; ++y){
             for(int x = 0; x < width; ++x){
@@ -215,6 +241,15 @@ public:
             }
         }
 
+
+        for(int i =0; i < (int)entities.size();++i){
+            int ex = entities[i].x;
+            int ey = entities[i].y;
+            if(inBounds(ex,ey)){
+                entityAt[ey][ex] = i;
+            }
+        }
+
         // Ensure enemy timer starts "fresh" after loading a level
         lastEnemyMove = std::chrono::steady_clock::now();
     }
@@ -227,12 +262,10 @@ public:
                 // Take tileType symbol
                 char cell = tileToChar(grid[y][x]);
 
-                // Check if an entity is in this position
-                for (auto& e : entities){
-                    if (e.x == x && e.y == y) {
-                        cell = e.symbol;
-                        break;
-                    }
+                // If there any entity, draw it
+                int idx = entityAt[y][x];
+                if(idx != -1){
+                    cell = entities[idx].symbol;
                 }
 
                 std::cout << cell;
