@@ -13,6 +13,12 @@
 #include "Entity.h"
 #include "Tile.h"
 
+// Current game state
+enum class GameState{
+    Running,
+    GameOver
+};
+
 // This class manages the game world and rendering
 class Game{
 private:
@@ -25,8 +31,8 @@ private:
     
     std::vector<std::vector<int>> entityAt; // Occupance grid: store entities index at [y][x], or -1 if empty
 
-    // Game state
-    bool gameOver;  // True when player collided with enemy
+    GameState state;
+
     std::vector<std::string> currentLevelMap;   // Stored to allow quick restart
 
     // Time control for enemy movement(ticks)
@@ -93,7 +99,7 @@ private:
                 e.y = newY;
                 entityAt[e.y][e.x] = entityIndex;   // Occupy new cell
 
-                gameOver = true;
+                state = GameState::GameOver;
                 return true;
             }
             return false;
@@ -109,12 +115,13 @@ private:
 
     void restartLevel(){
 
-        gameOver = false;
         pendingDx = 0;
         pendingDy = 0;
 
         // Reload level from stored map
         loadLevel(currentLevelMap);
+
+        state = GameState::Running;
 
         // Reset enemy timer to avoid instant movement after restart
         lastEnemyMove = std::chrono::steady_clock::now();
@@ -140,14 +147,14 @@ private:
     // Update world state(player, enemies, etc.)
     void update(){
 
-        if(gameOver){
+        if(state != GameState::Running){
             return;
         }
 
         // Move player
         if(playerIndex >= 0 && playerIndex < (int)entities.size()){
             (void)tryMoveEntity(playerIndex, pendingDx, pendingDy);
-            if(gameOver){
+            if(state == GameState::GameOver){
                 return;
             }
         }
@@ -167,7 +174,7 @@ private:
                     }
 
                     bool moved = tryMoveEntity(i, entities[i].vx, entities[i].vy);
-                    if(gameOver){
+                    if(state == GameState::GameOver){
                         return;
                     }
 
@@ -176,7 +183,7 @@ private:
                         entities[i].vy = -entities[i].vy;
                         (void)tryMoveEntity(i, entities[i].vx, entities[i].vy);
 
-                        if(gameOver){
+                        if(state == GameState::GameOver){
                             return;
                         }
                     }
@@ -197,7 +204,7 @@ public:
         playerIndex(-1), 
         pendingDx(0), 
         pendingDy(0),
-        gameOver(false),
+        state(GameState::Running),
         currentLevelMap(), 
         enemyMoveDelayMs(200) {
             lastEnemyMove = std::chrono::steady_clock::now();
@@ -209,7 +216,6 @@ public:
 
         entities.clear();
         playerIndex = -1;
-        gameOver = false;
 
         height = (int)map.size();
         width = (height > 0) ? (int)map[0].size() : 0;
@@ -250,6 +256,8 @@ public:
             }
         }
 
+        state = GameState::Running;
+
         // Ensure enemy timer starts "fresh" after loading a level
         lastEnemyMove = std::chrono::steady_clock::now();
     }
@@ -272,7 +280,7 @@ public:
             }
             std::cout << "\n";  // New line after each row
         }
-        if(gameOver){
+        if(state == GameState::GameOver){
             std::cout << "==========================" << std::endl;
             std::cout << "==    !GAME    OVER!    ==" << std::endl;
             std::cout << "==========================" << std::endl;
@@ -300,7 +308,7 @@ public:
                 if(c == 'r'){
                     restartLevel();
                 }
-                if(!gameOver){
+                if(state == GameState::Running){
                     handleInput(input);
                 }  
             }
